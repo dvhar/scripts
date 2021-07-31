@@ -1,0 +1,113 @@
+#!/bin/bash
+
+# turn a NIC into an internet gateway.
+# deps: fzf, named/bind, dhcpd, and firewalld
+
+#TODO: dynamic ip addresses
+egrep -q 'subnet 192.168.0.0 netmask 255.255.255.0' /etc/dhcpd.conf || {
+cat << EOF
+ERROR: /etc/dhcpd.conf should be like this:
+
+allow booting;
+allow bootp;
+authoratative;
+option option-128 code 128 = string;
+option option-129 code 129 = text;
+
+ddns-update-style none;
+subnet 192.168.0.0 netmask 255.255.255.0 {
+  default-lease-time 1200;
+  max-lease-time 1200;
+  option routers 192.168.0.1;
+  option subnet-mask 255.255.255.0;
+  option domain-name "local";
+  option domain-name-servers 192.168.0.1;
+  option broadcast-address 192.168.0.255;
+  group "local" {
+    host testmachine-enp8s0 {
+      hardware ethernet 00:a0:d1:89:87:09;
+      option host-name "testmachine";
+      fixed-address 192.168.0.23;
+      next-server 192.168.0.1;
+    }
+  }
+}
+EOF
+exit
+}
+
+#TODO: enable pihole as alternative to named
+sudo egrep -q localnet /etc/named.conf || {
+cat << EOF
+ERROR: /etc/named.conf should have this in the top level:
+
+acl localnet {
+  192.168.0.0/24;
+  localhost;
+};
+
+and this in options:
+
+    recursion yes;
+    allow-query { 127.0.0.1; localnet; };
+EOF
+exit
+}
+
+nics="$(ip a | egrep -o '^[0-9]+:\s+[^:]+' | grep -v '^1: lo' | cut -d' ' -f2)"
+echo pick your external NIC
+external=$(echo "$nics" | fzf --height $(($(echo "$nics" | wc -l)+2)))
+echo pick your internal NIC
+internal=$(echo "$nics" | fzf --height $(($(echo "$nics" | wc -l)+2)))
+
+[ -z $internal ] && echo must pick an internal NIC && exit
+[ -z $external ] && echo must pick an external NIC && exit
+
+ip a show dev $internal | grep 192.168.0.1 && {
+	echo $internal has correct IP address
+} || {
+	echo setting IP of $internal to 192.168.0.1
+	sudo ip addr add 192.168.0.1/24 dev $internal || {
+		echo failed to set internal NIC IP address
+		exit
+	}
+	sudo ip link set $internal up || {
+		echo failed to turn on internal NIC
+		exit
+	}
+}
+
+systemctl is-active named --quiet || sudo systemctl start named || {
+	echo named.service not working
+	exit
+}
+systemctl is-active dhcpd4 --quiet || sudo systemctl start dhcpd4 || {
+	echo dhcpd4.service not working
+	exit
+}
+
+inzone=$(sudo firewall-cmd --get-zone-of-interface=$internal)
+exzone=$(sudo firewall-cmd --get-zone-of-interface=$external)
+[ "$inzone" = "internal" ] || {
+	sudo firewall-cmd --change-interface=$internal --zone=internal
+}
+[ "$exzone" = "external" ] || {
+	sudo firewall-cmd --change-interface=$external --zone=external 
+}
+defaultzone="$(firewall-cmd --get-default-zone)"
+[ "$defaultzone" = "internal" ] || sudo firewall-cmd --set-default-zone=internal || {
+	echo could not set defualt zone to internal
+}
+
+services="$(sudo firewall-cmd --list-services)"
+openservice(){
+	echo "$services" | grep -q $1 || {
+		sudo firewall-cmd --zone=internal --add-service=$1
+		[ $? -ne 0 ] && echo could not open port for $1
+	}
+}
+openservice dhcp
+openservice dns 
+openservice http
+openservice https
+openservice ssh

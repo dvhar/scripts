@@ -1,0 +1,78 @@
+#!/bin/bash
+
+key=$TRANS_KEY
+[ "$key" = "" ] && echo "no api key!" && exit 1
+
+cn=zh-Hans
+quiet=false
+
+usage(){
+cat << EOF
+`basename $0` usage:
+  Repl if no arg, otherwise translate arg.
+  Export TRANS_KEY=<microsoft translator api key>
+  r		replay pronuciation
+  -q	disable pronuciation
+  -h	show this help message
+EOF
+exit 0
+}
+
+speak(){
+	command -v espeak2 > /dev/null && {
+		echo $@  | espeak2 > /dev/null 2>&1 &
+	} || {
+		echo $@  | espeak -vzh+f3 > /dev/null 2>&1 &
+	}
+}
+
+replay(){
+	command -v espeak2 > /dev/null && {
+		mpv /tmp/espeakpy.wav > /dev/null 2>&1 &
+	} || {
+		speak $(kv get translated 2> /dev/null) 
+	}
+}
+
+english(){
+	echo $@ | iconv -f ascii > /dev/null 2>&1
+}
+
+transline(){
+	[ "$LINE" = "r" ] && replay && return 0
+	english $LINE && {
+		flang=en; tlang=$cn;
+		spoke=false
+	} || {
+		tlang=en; flang=$cn;
+		speak $LINE
+		spoke=true
+	}
+	url="https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=${tlang}&from=${flang}&toScript=Latn" 
+	resp=$(curl -X POST "$url" -H "Ocp-Apim-Subscription-Key: $key" -H "Content-Type: application/json" -d "[{'Text':'$LINE'}]" 2> /dev/null)
+	translated=$(echo $resp | jq -r '.[0]["translations"][0]["text"]')
+	echo $translated
+	english $translated || {
+		echo $resp | jq -r '.[0]["translations"][0]["transliteration"]["text"]';
+		echo $translated  | kv up translated
+		[ $quiet = true ] || [ $spoke = true ] || speak $translated
+	}
+	return 0
+}
+
+while getopts "hq" opt; do
+  case $opt in
+    h) usage ;;
+    q) quiet=true; shift ;;
+  esac
+done
+
+[ $# -eq 0 ] && {
+  while IFS="" read -r -e -d $'\n' -p '> ' LINE; do 
+    history -s "$LINE"
+	transline
+  done
+} || {
+    LINE="$@"
+	transline
+}
