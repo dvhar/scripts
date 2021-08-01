@@ -85,18 +85,20 @@ systemctl is-active dhcpd4 --quiet || sudo systemctl start dhcpd4 || {
 	echo dhcpd4.service not working
 	exit
 }
+systemctl is-active firewalld --quiet || sudo systemctl start firewalld || {
+	echo firewalld.service not working
+	exit
+}
 
 inzone=$(sudo firewall-cmd --get-zone-of-interface=$internal)
 exzone=$(sudo firewall-cmd --get-zone-of-interface=$external)
-[ "$inzone" = "internal" ] || {
-	sudo firewall-cmd --change-interface=$internal --zone=internal
-}
-[ "$exzone" = "external" ] || {
-	sudo firewall-cmd --change-interface=$external --zone=external 
-}
+[ "$inzone" = "internal" ] || sudo firewall-cmd --change-interface=$internal --zone=internal
+[ "$exzone" = "external" ] || sudo firewall-cmd --change-interface=$external --zone=external 
+
 defaultzone="$(firewall-cmd --get-default-zone)"
 [ "$defaultzone" = "internal" ] || sudo firewall-cmd --set-default-zone=internal || {
 	echo could not set defualt zone to internal
+	exit
 }
 
 services="$(sudo firewall-cmd --list-services)"
