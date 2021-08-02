@@ -92,8 +92,12 @@ systemctl is-active firewalld --quiet || sudo systemctl start firewalld || {
 
 inzone=$(sudo firewall-cmd --get-zone-of-interface=$internal)
 exzone=$(sudo firewall-cmd --get-zone-of-interface=$external)
-[ "$inzone" = "internal" ] || sudo firewall-cmd --change-interface=$internal --zone=internal
+[ "$inzone" = "internal" ] || sudo firewall-cmd --change-interface=$internal --zone=internal || {
+	echo zone of $internal not set to internal
+}
 [ "$exzone" = "external" ] || sudo firewall-cmd --change-interface=$external --zone=external 
+	echo zone of $external not set to external
+}
 
 defaultzone="$(firewall-cmd --get-default-zone)"
 [ "$defaultzone" = "internal" ] || sudo firewall-cmd --set-default-zone=internal || {

@@ -28,7 +28,7 @@ zathuratab(){
 }
 
 opentolastpage(){
-	bookmark=$(sqlite3 $zfile "select case when bookmarks.page > fileinfo.page then bookmarks.page end from fileinfo left join bookmarks using(file) where file ='$1'")
+	bookmark=$(sqlite3 $zfile "select max(case when bookmarks.page > fileinfo.page then bookmarks.page end) from fileinfo left join bookmarks using(file) where file ='$1'")
 	if [ -z $bookmark ]; then
 		zathuratab $1
 	else
@@ -49,7 +49,7 @@ handlearg(){
 pickbook(){
 	vres=$(xrandr | grep primary | egrep -o '[0-9]+x[0-9]+' | cut -d'x' -f2)
 	[ $vres -gt 2000 ] && dpi='-dpi 200'
-	roficmd="rofi -dmenu -matching fuzzy -i -markup-rows $dpi"
+	roficmd="rofi -lines 25 -width 70 -dmenu -matching fuzzy -i -markup-rows $dpi"
 	books=$(sqlite3 $zfile 'select file from fileinfo;')
 	book=$(
 	for bookpath (${(f)books}); do
