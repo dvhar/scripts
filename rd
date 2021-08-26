@@ -27,8 +27,56 @@ zathuratab(){
 	fi
 }
 
+getpdrfile(){
+	[ -z $pdrpath ] && {
+		knum=$(echo $pluggedin | wc -w)
+		case $knum in
+			2) dev=$(echo $pluggedin | awk '{print $1; exit}')
+				udisksctl mount -b /dev/$dev
+				pdrpath=$(lsblk -l -o NAME,LABEL,MOUNTPOINTS | grep Kindle | awk '{print $3; exit}') ;;
+			3) pdrpath=$(echo $pluggedin | awk '{print $3; exit}');;
+		esac
+	}
+	[ -z $pdrpath ] && return 1
+	pdrdir=${pdrpath}/documents/rbooks
+	pdrfile=$pdrdir/${1//pdf/pdr}
+	[ ! -w $pdrfile ] && return 1
+	echo $pdrfile
+}
+
+getkindlepage(){
+	file=$(getpdrfile $1) || return 1
+	page=$(printf "%d" 0x$(xxd -s +7 -l 2 -p $file))
+	echo $page
+}
+
+setkindlepage(){
+	file=$(getpdrfile $1) || return 1
+	printf "%04x" $2 | xxd -p -r | dd of=$file seek=7 conv=notrunc obs=1 count=2 status=none
+	echo "$1 set to $2"
+}
+
+synckindle(){
+	[[ $1 =~ .*epub$ ]] && return
+	pluggedin=$(lsblk -l -o NAME,LABEL,MOUNTPOINTS | grep Kindle | head -n 1)
+	[ -z $pluggedin ] && return
+	basename=$(basename $1)
+	zathurapage=$(sqlite3 $zfile "select max(coalesce(max(bookmarks.page),0), coalesce(max(fileinfo.page),0)) from fileinfo left join bookmarks using(file) where file ='$1'")
+	[ -z $zathurapage ] && return
+	kindlepage=$(getkindlepage $basename)
+	[ -z $kindlepage ] && return
+	#kindlepage is one less than what it opens to
+	let kindlepage++
+	if [ $zathurapage -gt $kindlepage ]; then
+		setkindlepage $basename $((zathurapage-1))
+	elif [ $zathurapage -lt $kindlepage ]; then
+		bookmark=$kindlepage
+	fi
+}
+
 opentolastpage(){
 	bookmark=$(sqlite3 $zfile "select max(case when bookmarks.page > fileinfo.page then bookmarks.page end) from fileinfo left join bookmarks using(file) where file ='$1'")
+	synckindle $1
 	if [ -z $bookmark ]; then
 		zathuratab $1
 	else
@@ -57,10 +105,11 @@ pickbook(){
 	done | eval $roficmd)
 	for bookpath (${(f)books}); do
 		if [ "$(basename $bookpath)" = "$book" ]; then
-			[[ -f "$bookpath" ]] && opentolastpage $bookpath
+			[[ -f "$bookpath" ]] && openbook=$bookpath
 			break
 		fi
 	done
+	[ -z $openbook ] || opentolastpage $openbook
 }
 
 [ $# -eq 0 ] && pickbook
