@@ -8,6 +8,7 @@ xidfile=/tmp/tabbed-surf.xid
 zfile=$datadir/bookmarks.sqlite
 
 runtabbed() {
+	echo opening $@
 	tabbed -dn tabbed-surf -r 2 zathura -e '' $@ -d "$datadir" > "$xidfile"
 	#tabbed -g 2000x2000 -dn tabbed-surf -r 2 zathura -e '' "$1" -d "$datadir" > "$xidfile"
 }
@@ -22,13 +23,14 @@ zathuratab(){
 		then
 			runtabbed $@
 		else
+			echo opening $@
 			zathura -e $xid $@ -d $datadir --fork
 		fi
 	fi
 }
 
 connectkindle(){
-	[ -d $pdrdir ] && [ ! -z $pdrdir ] && return 0
+	[ -d $pdrdir ] && [ ! -z $pdrdir ] && echo connected to $pdrdir && return 0
 	pluggedin=$(lsblk -l -o NAME,LABEL,MOUNTPOINTS | grep Kindle | head -n 1)
 	case $(echo $pluggedin | wc -w) in
 		2) dev=$(echo $pluggedin | awk '{print $1; exit}')
@@ -37,7 +39,9 @@ connectkindle(){
 		3) pdrdir=$(echo $pluggedin | awk '{print $3; exit}');;
 	esac
 	pdrdir=${pdrdir}/documents/rbooks
-	[ -d $pdrdir ] || unset pdrdir && return 1
+	[ -d $pdrdir ] || { echo error with $pdrdir; return 1 }
+	echo connected to $pdrdir
+	return 0
 }
 
 getpdrfile(){
@@ -60,11 +64,13 @@ setkindlepage(){
 
 synckindle(){
 	[[ $1 =~ .*epub$ ]] && return
+	echo syncing $1
 	connectkindle || return
 	basename=$(basename $1)
-	kindlepage=$(getkindlepage $basename) || echo $basename not on kindle && return
+	kindlepage=$(getkindlepage $basename) || { echo $basename not on kindle; return }
 	zathurapage=$(sqlite3 $zfile "select max(coalesce(max(bookmarks.page),0), coalesce(max(fileinfo.page),0)) from fileinfo left join bookmarks using(file) where file ='$1'")
-	[ -z $zathurapage ] && return
+	[ -z $zathurapage ] && echo "$basename not in zathura db" && return
+	echo "basename: z: $zathurapage k: $kindlepage"
 	#kindlepage is one less than what it opens to
 	let kindlepage++
 	if [ $zathurapage -gt $kindlepage ]; then
@@ -84,6 +90,7 @@ syncallkindle(){
 }
 
 opentolastpage(){
+	[ ! -r $1 ] && echo $1 not found && return
 	bookmark=$(sqlite3 $zfile "select max(case when bookmarks.page > fileinfo.page then bookmarks.page end) from fileinfo left join bookmarks using(file) where file ='$1'")
 	synckindle $1
 	if [ -z $bookmark ]; then
@@ -94,6 +101,7 @@ opentolastpage(){
 }
 
 handlearg(){
+	[ ! -r $1 ] && echo $1 not found && return
 	fullpath=$(realpath $1)
 	basename=$(basename $1)
 	updateq="update fileinfo set file = '$fullpath' where file like '%$basename%'"
@@ -114,16 +122,30 @@ pickbook(){
 	done | eval $roficmd)
 	for bookpath (${(f)books}); do
 		if [ "$(basename $bookpath)" = "$book" ]; then
-			[[ -f "$bookpath" ]] && openbook=$bookpath
+			[ -r $bookpath ] && echo $bookpath
 			break
 		fi
 	done
-	[ -z $openbook ] || opentolastpage $openbook
 }
 
-[ $# -eq 0 ] && pickbook
+dropbook(){
+	book=$(pickbook)
+	[ -z $book ] && return	
+	sqlite3 $zfile "delete from fileinfo where file = '$book'"
+	echo deleted $book from database
+	exit
+}
+
+readbook(){
+	book=$(pickbook)
+	[ -z $book ] && return	
+	opentolastpage $book
+}
+
+[ $# -eq 0 ] && readbook
 [ $# -gt 0 ] && {
 	[ $1 = k ] && syncallkindle
+	[ $1 = d ] && dropbook
 	[ $# -gt 1 ] && noread=true
 	for book in "$@"; do
 		handlearg "$book"
