@@ -39,7 +39,7 @@ connectkindle(){
 		3) pdrdir=$(echo $pluggedin | awk '{print $3; exit}');;
 	esac
 	pdrdir=${pdrdir}/documents/rbooks
-	[ -d $pdrdir ] || { echo error with $pdrdir; return 1 }
+	[ -d $pdrdir ] || { echo not connect to kindle; return 1 }
 	echo connected to $pdrdir
 	return 0
 }
@@ -51,7 +51,15 @@ getpdrfile(){
 }
 
 getkindlepage(){
-	file=$(getpdrfile $1) || return 1
+	file=$(getpdrfile $1) || {
+		pdffile=$pdrdir/$1
+		if [ -r $pdffile ]; then
+			echo "deadcabb010000000000000000" | xxd -p -r > $pdrdir/${1//pdf/pdr}
+			echo 0; return 0
+		else
+			return 1
+		fi
+	}
 	page=$(printf "%d" 0x$(xxd -s +7 -l 2 -p $file))
 	echo $page
 }
@@ -70,11 +78,11 @@ synckindle(){
 	kindlepage=$(getkindlepage $basename) || { echo $basename not on kindle; return }
 	zathurapage=$(sqlite3 $zfile "select max(coalesce(max(bookmarks.page),0), coalesce(max(fileinfo.page),0)) from fileinfo left join bookmarks using(file) where file ='$1'")
 	[ -z $zathurapage ] && echo "$basename not in zathura db" && return
-	echo "basename: z: $zathurapage k: $kindlepage"
+	echo "book: $basename zathura: $zathurapage kindle: $kindlepage"
 	#kindlepage is one less than what it opens to
 	let kindlepage++
 	if [ $zathurapage -gt $kindlepage ]; then
-		setkindlepage $basename $((zathurapage-1))
+		setkindlepage $basename $zathurapage
 	elif [ $zathurapage -lt $kindlepage ]; then
 		bookmark=$kindlepage
 	fi
