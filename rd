@@ -27,18 +27,20 @@ zathuratab(){
 	fi
 }
 
+connectkindle(){
+	[ -d $pdrdir ] && [ ! -z $pdrdir ] && return 0
+	pluggedin=$(lsblk -l -o NAME,LABEL,MOUNTPOINTS | grep Kindle | head -n 1)
+	case $(echo $pluggedin | wc -w) in
+		2) dev=$(echo $pluggedin | awk '{print $1; exit}')
+			udisksctl mount -b /dev/$dev
+			pdrdir=$(lsblk -l -o LABEL,MOUNTPOINTS | grep Kindle | awk '{print $2; exit}') ;;
+		3) pdrdir=$(echo $pluggedin | awk '{print $3; exit}');;
+	esac
+	pdrdir=${pdrdir}/documents/rbooks
+	[ -d $pdrdir ] || unset pdrdir && return 1
+}
+
 getpdrfile(){
-	[ -z $pdrpath ] && {
-		knum=$(echo $pluggedin | wc -w)
-		case $knum in
-			2) dev=$(echo $pluggedin | awk '{print $1; exit}')
-				udisksctl mount -b /dev/$dev
-				pdrpath=$(lsblk -l -o NAME,LABEL,MOUNTPOINTS | grep Kindle | awk '{print $3; exit}') ;;
-			3) pdrpath=$(echo $pluggedin | awk '{print $3; exit}');;
-		esac
-	}
-	[ -z $pdrpath ] && return 1
-	pdrdir=${pdrpath}/documents/rbooks
 	pdrfile=$pdrdir/${1//pdf/pdr}
 	[ ! -w $pdrfile ] && return 1
 	echo $pdrfile
@@ -58,13 +60,11 @@ setkindlepage(){
 
 synckindle(){
 	[[ $1 =~ .*epub$ ]] && return
-	pluggedin=$(lsblk -l -o NAME,LABEL,MOUNTPOINTS | grep Kindle | head -n 1)
-	[ -z $pluggedin ] && return
+	connectkindle || return
 	basename=$(basename $1)
+	kindlepage=$(getkindlepage $basename) || echo $basename not on kindle && return
 	zathurapage=$(sqlite3 $zfile "select max(coalesce(max(bookmarks.page),0), coalesce(max(fileinfo.page),0)) from fileinfo left join bookmarks using(file) where file ='$1'")
 	[ -z $zathurapage ] && return
-	kindlepage=$(getkindlepage $basename)
-	[ -z $kindlepage ] && return
 	#kindlepage is one less than what it opens to
 	let kindlepage++
 	if [ $zathurapage -gt $kindlepage ]; then
@@ -72,6 +72,15 @@ synckindle(){
 	elif [ $zathurapage -lt $kindlepage ]; then
 		bookmark=$kindlepage
 	fi
+}
+
+syncallkindle(){
+	echo updating all kindle bookmarks
+	books=$(sqlite3 $zfile 'select file from fileinfo')
+	for bookpath (${(f)books}); do
+		synckindle $bookpath
+	done
+	exit
 }
 
 opentolastpage(){
@@ -98,7 +107,7 @@ pickbook(){
 	vres=$(xrandr | grep primary | egrep -o '[0-9]+x[0-9]+' | cut -d'x' -f2)
 	[ $vres -gt 2000 ] && dpi='-dpi 200'
 	roficmd="rofi -lines 25 -width 70 -dmenu -matching fuzzy -i -markup-rows $dpi"
-	books=$(sqlite3 $zfile 'select file from fileinfo;')
+	books=$(sqlite3 $zfile 'select file from fileinfo')
 	book=$(
 	for bookpath (${(f)books}); do
 		basename $bookpath
@@ -114,6 +123,7 @@ pickbook(){
 
 [ $# -eq 0 ] && pickbook
 [ $# -gt 0 ] && {
+	[ $1 = k ] && syncallkindle
 	[ $# -gt 1 ] && noread=true
 	for book in "$@"; do
 		handlearg "$book"
