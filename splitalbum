@@ -1,7 +1,7 @@
 #!/bin/bash
-#deps: mp3splt and ffmpeg
+#deps: mp3splt, ffmpeg, youtube-dl
 
-infile=$1
+input="$1"
 timestamps=$2
 
 chkcommand(){
@@ -12,11 +12,12 @@ chkcommand(){
 }
 chkcommand ffmpeg
 chkcommand mp3splt
+chkcommand youtube-dl
 
 usage(){
 	cat << EOF
 usage:
-`basename $0` album.(wav|mp3) timestamps.txt
+`basename $0` <wav/mp3 file or youtube link> timestamps.txt
 
 example timestamps file:
 0:00 The Young Buccaneer
@@ -25,9 +26,10 @@ example timestamps file:
 EOF
 	exit
 }
-[ $# -ne 2 ] || [[ ! $infile =~ .*.(wav|mp3)$ ]] || [[ ! $timestamps =~ .*.txt$ ]] && usage
+[ $# -ne 2 ] || [[ ! "$input" =~ ((wav|mp3)$|youtube) ]] || [[ ! $timestamps =~ .*.txt$ ]] && usage
 [ ! -f $timestamps ] && echo $timestamps does not exit && exit
-[ ! -f "$infile" ] && echo "$infile" does not exit && exit
+[[ "$input" =~ (wav|mp3)$ ]] && [ ! -f "$input" ] && echo "$input" does not exit && exit
+
 
 echo Artist name:
 read artist
@@ -36,8 +38,15 @@ read album
 echo Genre:
 read genre
 
-convertfile(){
-	if [[ "$infile" =~ .*.wav$ ]]; then
+
+downloadconvert(){
+	if [[ "$input" =~ youtube ]]; then
+		infile="/tmp/ym-$(date '+%s%N').wav"
+		youtube-dl -x --audio-format wav --prefer-ffmpeg -o $infile --max-downloads 1 "$input"
+	else
+		infile="$input"
+	fi
+	if [[ "$infile" =~ wav$ ]]; then
 		mp3file="${infile%%.*}.mp3"
 		ffmpeg -i "$infile" "$mp3file"
 		[ $? -eq 0 ] && rm "$infile"
@@ -97,6 +106,6 @@ splitintofiles(){
 	mp3splt -c $cue "$mp3file" -o @t -d ${album// /} || cat $cue
 }
 
-convertfile
+downloadconvert
 generatecue
 splitintofiles

@@ -30,7 +30,7 @@ zathuratab(){
 }
 
 connectkindle(){
-	[ -d $pdrdir ] && [ ! -z $pdrdir ] && echo connected to $pdrdir && return 0
+	[ -d $pdrdir ] && [ ! -z $pdrdir ] && return 0
 	pluggedin=$(lsblk -l -o NAME,LABEL,MOUNTPOINTS | grep Kindle | head -n 1)
 	case $(echo $pluggedin | wc -w) in
 		2) dev=$(echo $pluggedin | awk '{print $1; exit}')
