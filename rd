@@ -1,6 +1,5 @@
 #!/bin/zsh
-#no args to read book from menu, file args to update location of existing books or add single book
-#deps: rofi, zathura configured to use sqlite, suckless tabbed
+#deps: rofi, zathura configured to use sqlite, suckless tabbed, calibre
 
 datadir=/home/d/sync/configs
 
@@ -35,11 +34,11 @@ connectkindle(){
 	case $(echo $pluggedin | wc -w) in
 		2) dev=$(echo $pluggedin | awk '{print $1; exit}')
 			udisksctl mount -b /dev/$dev
-			pdrdir=$(lsblk -l -o LABEL,MOUNTPOINTS | grep Kindle | awk '{print $2; exit}') ;;
+			pdrdir=$(lsblk -l -o LABEL,MOUNTPOINTS | awk '/Kindle/{print $2; exit}') ;;
 		3) pdrdir=$(echo $pluggedin | awk '{print $3; exit}');;
 	esac
 	pdrdir=${pdrdir}/documents/rbooks
-	[ -d $pdrdir ] || { echo not connect to kindle; return 1 }
+	[ -d $pdrdir ] || { echo not connected to kindle; return 1 }
 	echo connected to $pdrdir
 	return 0
 }
@@ -60,14 +59,13 @@ getkindlepage(){
 			return 1
 		fi
 	}
-	page=$(printf "%d" 0x$(xxd -s +7 -l 2 -p $file))
-	echo $page
+	printf "%d" 0x$(xxd -s +7 -l 2 -p $file)
 }
 
 setkindlepage(){
 	file=$(getpdrfile $1) || return 1
 	printf "%04x" $2 | xxd -p -r | dd of=$file seek=7 conv=notrunc obs=1 count=2 status=none
-	echo "$1 set to $2"
+	echo "set $1 to $2"
 }
 
 synckindle(){
@@ -136,9 +134,20 @@ pickbook(){
 	done
 }
 
+synconekindle(){
+	book=$(pickbook)
+	[ -z $book ] && exit	
+	[[ $book =~ epub$ ]] && exit
+	connectkindle || exit
+	target=${pdrdir}/$(basename $book)
+	[ -r $target ] || cp -v $book $pdrdir
+	synckindle $book
+	exit
+}
+
 dropbook(){
 	book=$(pickbook)
-	[ -z $book ] && return	
+	[ -z $book ] && exit	
 	sqlite3 $zfile "delete from fileinfo where file = '$book'"
 	echo deleted $book from database
 	exit
@@ -146,16 +155,43 @@ dropbook(){
 
 readbook(){
 	book=$(pickbook)
-	[ -z $book ] && return	
+	[ -z $book ] && exit	
 	opentolastpage $book
 }
 
-[ $# -eq 0 ] && readbook
-[ $# -gt 0 ] && {
-	[ $1 = k ] && syncallkindle
-	[ $1 = d ] && dropbook
-	[ $# -gt 1 ] && noread=true
-	for book in "$@"; do
-		handlearg "$book"
-	done
+convertpdf(){
+	book=$(pickbook)
+	[[ ! $book =~ epub$ ]] && exit
+	newbook=${bookk//.epub/.pdf}
+	ebook-convert $book $newbook
+	opentolastpage $newbook
 }
+
+usage(){
+	cat << EOF
+usage:
+    No args to read book from menu.
+    Args:
+      h: Show this help menu.
+      s: Sync one book with kindle from menu and add it if not on kindle.
+      k: Sync all books with kindle if present.
+      d: Delete book from database file (not delete book file).
+      c: Convert selected epub to pdf.
+      Any number of pdf/epub files:
+        Add a book and open it, update locations of moved books
+EOF
+	exit
+}
+
+[ $# -eq 0 ] && readbook
+[ $# -gt 0 ] && case $1 in
+	h ) usage;;
+	k ) syncallkindle;;
+	s ) synconekindle;;
+	d ) dropbook;;
+	c ) convertpdf;;
+	* ) [ $# -gt 1 ] && noread=true
+		for book in "$@"; do
+			handlearg "$book"
+		done;;
+	esac

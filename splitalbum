@@ -43,6 +43,7 @@ downloadconvert(){
 	if [[ "$input" =~ youtube ]]; then
 		infile="/tmp/ym-$(date '+%s%N').wav"
 		youtube-dl -x --audio-format wav --prefer-ffmpeg -o $infile --max-downloads 1 "$input"
+		trap "rm -f ${infile%%.*}.mp3" EXIT
 	else
 		infile="$input"
 	fi
