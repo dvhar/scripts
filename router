@@ -95,7 +95,7 @@ exzone=$(sudo firewall-cmd --get-zone-of-interface=$external)
 [ "$inzone" = "internal" ] || sudo firewall-cmd --change-interface=$internal --zone=internal || {
 	echo zone of $internal not set to internal
 }
-[ "$exzone" = "external" ] || sudo firewall-cmd --change-interface=$external --zone=external 
+[ "$exzone" = "external" ] || sudo firewall-cmd --change-interface=$external --zone=external || {
 	echo zone of $external not set to external
 }
 
