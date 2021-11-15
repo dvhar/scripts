@@ -73,20 +73,24 @@ getkindlepage(){
 setkindlepage(){
 	file=$(getpdrfile $1) || return 1
 	printf "%04x" $2 | xxd -p -r | dd of=$file seek=7 conv=notrunc obs=1 count=2 status=none
-	echo "set $1 to $2"
+	echo "set $1 to $2 on kindle"
 }
 
 connectandroid(){
-	lsusb | grep Android
+	lsusb | grep -q Android
 	[ $? -ne 0 ] && return 1;
 	phonereadfile='mtp:/G8 ThinQ/Internal shared storage/Librera/profile.Librera/device.LM-G820/app-Progress.json'
 	phonewritefile='/home/d/mnt/phone/Internal shared storage/Librera/profile.Librera/device.LM-G820/app-Progress.json'
 }
 
-#args: pdf filepath
-getphonepage(){
+getallphonepages(){
 	connectandroid || return 1
 	[ -z $progjson ] && progjson=$(kioclient5 cat $phonereadfile)
+}
+
+#args: pdf filepath
+getphonepage(){
+	[ -z $progjson ] && return 1
 	totalpages=$(pdfinfo $1 | awk '/Pages/{print $2}')
 	percent=$(echo $progjson | jq ".\"$(basename $1)\".p")
 	[ -z $percent ] && return 1
@@ -96,11 +100,14 @@ getphonepage(){
 setphonepages(){
 	[ -z $phoneupdates ] && return 1
 	phoneupdates='{'$phoneupdates[2,-1]'}'
+	echo "phoneupdates '$phoneupdates'"
 	connectandroid || return 1
+	echo "progjson '$progjson'"
 	[ -z $progjson ] && return 1
 	pkill kiod5 || { echo 'failed to stop kiod5'; return 1 }
 	aft-mtp-mount ~/mnt/phone || { echo 'failed to mount phone with aft'; return 1 }
 	updater="import json,sys; true=True; false=False
+sys.stderr.write('testing python print')
 newvals = $phoneupdates
 fullvals = $progjson
 changed = False
@@ -111,7 +118,8 @@ for book in newvals:
 		sys.stderr.write('updating phone ' + book)
 if changed:
 	json.dump(fullvals, sys.stdout, separators=(',', ':'))"
-	python -c $updater > $phonewritefile
+	echo "running phone updater now"
+	python -c $updater > $phonewritefile | cat -
 }
 
 #args: page, pdf filepath
@@ -132,11 +140,14 @@ syncdevices(){
 	[[ $1 =~ pdf$ ]] && {
 		echo "$basename is pdf"
 		local kindlepage=$(getkindlepage $basename) || echo $basename not on kindle
+		getallphonepages
 		local phonepage=$(getphonepage $1) || echo $basename not on phone
 		echo "found: $basename zathura: '$zathurapage' kindle: '$kindlepage' phone: '$phonepage'"
 	}
 	[ -z $kindlepage ] && [ -z $phonepage ] && { echo $basename page not found on devices; return 1 }
 	local maxpage=0
+	[ ! -z $kindlepage ] && echo kindlepage $kindlepage
+	[ ! -z $phonepage ] && echo phonepage $phonepage
 	[ ! -z $kindlepage ] && maxpage=$((kindlepage > zathurapage ? kindlepage : zathurapage))
 	[ ! -z $phonepage ] && maxpage=$((maxpage > phonepage ? maxpage : phonepage))
 	((zathurapage > maxpage)) && maxpage=$zathurapage
@@ -152,6 +163,7 @@ syncalldevice(){
 		syncdevices $bookpath
 	done
 	setphonepages
+	sync
 	exit
 }
 
@@ -183,13 +195,14 @@ handlearg(){
 pickbook(){
 	vres=$(xrandr | grep primary | egrep -o '[0-9]+x[0-9]+' | cut -d'x' -f2)
 	[ $vres -gt 2000 ] && dpi='-dpi 200'
-	roficmd="rofi -l 25 -theme-str 'window {width: 70%;}' -dmenu -matching fuzzy -i -markup-rows $dpi"
+	smoll='-dpi 70'
+	roficmd="rofi -theme-str 'window {width: 80%;}' -dmenu -matching fuzzy -i -markup-rows ${dpi-smoll}"
 	[ -z $DISPLAY ] && roficmd=fzf
 	books=$(sqlite3 $zfile 'select file from fileinfo')
 	book=$(
 	for bookpath (${(f)books}); do
 		basename $bookpath
-	done | eval $roficmd)
+	done | sort | eval $roficmd)
 	for bookpath (${(f)books}); do
 		if [ "$(basename $bookpath)" = "$book" ]; then
 			[ -r $bookpath ] && echo $bookpath
@@ -260,6 +273,7 @@ EOF
 	s ) synconedevice;;
 	d ) dropbook;;
 	c ) convertpdf;;
+	p ) testphone;;
 	* ) [ $# -gt 1 ] && noread=true
 		for book in "$@"; do
 			handlearg "$book"
