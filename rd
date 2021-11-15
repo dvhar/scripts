@@ -1,10 +1,12 @@
 #!/bin/zsh
-#deps: rofi, fzf, zathura configured to use sqlite, suckless tabbed, calibre, jq
+#deps: rofi, fzf, zathura configured to use sqlite, suckless tabbed, calibre, jq, go-mtpfs
 
 datadir=/home/d/sync/configs
 
 xidfile=/tmp/tabbed-rd.xid
 zfile=$datadir/bookmarks.sqlite
+
+trap 'fusermount -u ~/mnt/phone' EXIT
 
 runtabbed() {
 	echo opening $@
@@ -77,15 +79,19 @@ setkindlepage(){
 }
 
 connectandroid(){
+	[ ! -z $phonefile ] && echo "phone file is already connected: $phonefile" && return 0
 	lsusb | grep -q Android
-	[ $? -ne 0 ] && return 1;
-	phonereadfile='mtp:/G8 ThinQ/Internal shared storage/Librera/profile.Librera/device.LM-G820/app-Progress.json'
-	phonewritefile='/home/d/mnt/phone/Internal shared storage/Librera/profile.Librera/device.LM-G820/app-Progress.json'
+	[ $? -ne 0 ] && echo 'no android connected' && return 1;
+	mkdir -p ~/mnt/phone
+	pgrep kiod5 && pkill kiod5
+	pgrep go-mtpfs || { go-mtpfs ~/mnt/phone &; sleep 1 }
+	phonefile="$HOME/mnt/phone/Internal shared storage/Librera/profile.Librera/device.LM-G820/app-Progress.json"
+	#[ -w $phonefile ] ||  echo 'phone file is not writable' && unset phonefile && return 1
 }
 
 getallphonepages(){
 	connectandroid || return 1
-	[ -z $progjson ] && progjson=$(kioclient5 cat $phonereadfile)
+	[ -z $progjson ] && progjson=$(cat $phonefile)
 }
 
 #args: pdf filepath
@@ -104,8 +110,6 @@ setphonepages(){
 	connectandroid || return 1
 	echo "progjson '$progjson'"
 	[ -z $progjson ] && return 1
-	pkill kiod5 || { echo 'failed to stop kiod5'; return 1 }
-	aft-mtp-mount ~/mnt/phone || { echo 'failed to mount phone with aft'; return 1 }
 	updater="import json,sys; true=True; false=False
 sys.stderr.write('testing python print')
 newvals = $phoneupdates
@@ -119,7 +123,7 @@ for book in newvals:
 if changed:
 	json.dump(fullvals, sys.stdout, separators=(',', ':'))"
 	echo "running phone updater now"
-	python -c $updater > $phonewritefile | cat -
+	python -c $updater > $phonefile
 }
 
 #args: page, pdf filepath
@@ -273,7 +277,6 @@ EOF
 	s ) synconedevice;;
 	d ) dropbook;;
 	c ) convertpdf;;
-	p ) testphone;;
 	* ) [ $# -gt 1 ] && noread=true
 		for book in "$@"; do
 			handlearg "$book"
