@@ -1,0 +1,15 @@
+#!/bin/sh
+
+if [ $# -eq 0 ]; then
+	nvim `fzf $@`
+else
+	files="$(fd -H --color always -t f $@)"
+	lines=`echo "$files" | wc -l`
+
+	if [ "$lines" = "0" ]; then
+		echo not found
+	else
+		file=$(echo "$files" | fzh)
+		[ ! -z "$file" ] && nvim $file
+	fi
+fi

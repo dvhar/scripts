@@ -1,0 +1,14 @@
+#!/bin/bash
+
+dirs="$(fd $@ | xargs dirname | uniq)"
+lines=`echo "$dirs" | wc -l`
+
+if [ "$lines" = "0" ]; then
+	echo not found
+elif [ "$lines" = "1" ]; then
+	echo $dirs
+	cd "$dirs"
+else
+	dir=$(echo "$dirs" | fzh)
+	[ ! -z "$dir" ] && cd $dir
+fi

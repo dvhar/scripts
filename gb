@@ -1,0 +1,12 @@
+#!/bin/bash
+
+if [ $# -gt 0 ]; then
+	git checkout $1
+else
+	b=$(git branch)
+	n=$(echo "$b" | fzf --height $(($(echo "$b" | wc -l)+2)))
+	n=${n##* }
+	[ -z "$n" ] && exit
+	echo $n
+	git checkout $n
+fi
